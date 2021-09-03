@@ -69,7 +69,9 @@ def api_contribute(request):
     branch = 'gbContribute-{}-{}_{}-{}'.format(release_type, data['iso'], data['level'], get_timehash())
     submit_title = '{}_{} {}'.format(data['iso'], data['level'], release_type)
     submit_body = '''
-Data submitted by {name}, from {affil}.
+A user has just submitted boundary data through the geoBoundaries contribution form. 
+Name: {name}.
+Affiliation: {affil}.
 Contact: {email}.
 Notes about these data: {notes}
 '''.format(name=data['contributor_name'],
@@ -132,7 +134,7 @@ def standardize_uploaded_shapefile(reader, iso, level, name_field):
                'Level':level,
                'ISO_Code':iso,
                }
-        writer.record(attr)
+        writer.record(**attr)
         writer.shape(shaperec.shape)
     # close up
     writer.close()
