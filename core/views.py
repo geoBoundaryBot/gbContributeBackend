@@ -101,7 +101,7 @@ def create_meta_file(data):
         line = 'Source {}: {}'.format(i, src)
         lines.append(line)
         i += 1
-    line = 'Release Type: {}'.format(data.get('release',''))
+    line = 'Release Type: {}'.format(data.get('release_type',''))
     lines.append(line)
     line = 'License: {}'.format(data.get('license',''))
     lines.append(line)
