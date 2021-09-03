@@ -4,9 +4,11 @@ from decouple import config
 
 import os
 import io
-import shapefile
 import zipfile
 import tempfile
+import shapefile
+from github import Github
+
 
 def get_timehash():
     from hashlib import blake2b
@@ -133,7 +135,6 @@ def standardize_uploaded_shapefile(reader, iso, level, name_field):
     return writer
 
 def submit_to_github(branchname, title, body, files):
-    from github import Github
     # init
     token = config('GITHUB_TOKEN')
     g = Github(token)
