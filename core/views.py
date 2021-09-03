@@ -84,32 +84,36 @@ Notes about these data: {notes}
 
 def create_meta_file(data):
     writer = open(tempfile.mktemp(), mode='w', encoding='utf8')
-    
+
+    lines = []
     line = 'Boundary Representative of Year: {}'.format(data['year'])
-    writer.writeline(line)
+    lines.append(line)
     line = 'ISO-3166-1: {}'.format(data['iso'])
-    writer.writeline(line)
+    lines.append(line)
     line = 'Boundary Type: {}'.format(data['level'])
-    writer.writeline(line)
+    lines.append(line)
     line = 'Canonical Boundary Name: {}'.format(data.get('type',''))
-    writer.writeline(line)
+    lines.append(line)
     i = 1
     for src in data['source'].split(';'):
         line = 'Source {}: {}'.format(i, src)
-        writer.writeline(line)
+        lines.append(line)
         i += 1
     line = 'Release Type: {}'.format(data.get('release',''))
-    writer.writeline(line)
+    lines.append(line)
     line = 'License: {}'.format(data.get('license',''))
-    writer.writeline(line)
+    lines.append(line)
     line = 'License Notes: {}'.format(data.get('license_details',''))
-    writer.writeline(line)
+    lines.append(line)
     line = 'License Source: {}'.format(data.get('license_url',''))
-    writer.writeline(line)
+    lines.append(line)
     line = 'Link to Source Data: {}'.format(data.get('source_url',''))
-    writer.writeline(line)
+    lines.append(line)
     line = 'Other Notes: {}'.format(data.get('notes',''))
-    writer.writeline(line)
+    lines.append(line)
+
+    content = '\n'.join(lines)
+    writer.write(content)
     
     writer.close()
     return writer
