@@ -1,1 +1,1 @@
-web: gunicorn mapconvert_site.wsgi
+web: gunicorn core.wsgi
