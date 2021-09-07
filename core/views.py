@@ -67,8 +67,8 @@ def api_contribute(request):
     # submit to github
     release_type = 'gbOpen'
     branch = 'gbContribute-{}-{}_{}-{}'.format(release_type, data['iso'], data['level'], get_timehash())
-    submit_title = '{}_{} {}'.format(data['iso'], data['level'], release_type)
-    submit_body = '''
+    submit_title = 'TEST_{}_{} {}'.format(data['iso'], data['level'], release_type)
+    submit_body = '''THIS IS JUST A TEST.
 A user has just submitted boundary data through the geoBoundaries contribution form. 
 Name: {name}.
 Affiliation: {affil}.
@@ -144,18 +144,30 @@ def submit_to_github(branchname, title, body, files):
     # init
     token = config('GITHUB_TOKEN')
     g = Github(token)
-    repo = g.get_user().get_repo('boundaryCompare') # geoBoundaries
+    upstream = g.get_repo('wmgeolab/geoBoundaries') # upstream
+    # get or create the fork
+    try:
+        repo = g.get_user().get_repo('geoBoundaries')
+    except:
+        repo = g.get_user().create_fork(upstream)
+    # make sure the main branch of the fork is updated
+    # ... 
     oldname = 'main'
     # create new branch
     newname = branchname
+    print('branch name',newname)
     repo.create_git_ref(ref='refs/heads/' + newname, sha=repo.get_branch(oldname).commit.sha)
     # commit files to new branch
     for src,dst in files.items():
         message = 'Add {}'.format(dst)
         content = open(src, mode='rb').read()
-        repo.create_file(dst, message, content, branch=newname)
+        try:
+            repo.create_file(dst, message, content, branch=newname)
+        except:
+            existing = repo.get_contents(dst, ref='refs/heads/' + newname)
+            repo.update_file(dst, message, content, sha=existing.sha, branch=newname)
     # make pull request
-    repo.create_pull(title, body, base=oldname, head=newname)
+    upstream.create_pull(title, body, base=oldname, head='geoBoundaryBot:'+newname)
 
 ##def test_submit_to_github(*args):
 ##    token = config('GITHUB_TOKEN')
