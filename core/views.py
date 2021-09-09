@@ -5,10 +5,13 @@ from decouple import config
 
 import os
 import io
+import json
 import zipfile
 import tempfile
 import shapefile
 from github import Github
+from urllib.request import urlopen
+from urllib.parse import quote_plus
 
 
 def get_timehash():
@@ -77,7 +80,8 @@ def api_contribute(request):
     submit_archive.writestr('{}.prj'.format(shapefile_name), wgs84_wkt.encode('utf8'))
 
     # license screenshot
-    submit_archive.writestr('LICENSE.PNG', screenshot_fileobj.read())
+    _,ext = os.path.splitext(screenshot_fileobj.name)
+    submit_archive.writestr('license{}'.format(ext), screenshot_fileobj.read())
 
     # close
     submit_archive.close()
@@ -86,22 +90,25 @@ def api_contribute(request):
     # submit to github
     release_type = 'gbOpen'
     branch = 'gbContribute-{}-{}_{}-{}'.format(release_type, data['iso'], data['level'], get_timehash())
-    submit_title = 'TESTING: {}_{} {}'.format(data['iso'], data['level'], release_type)
-    submit_body = '''THIS IS JUST A TEST.
-A user has just submitted boundary data through the geoBoundaries contribution form. 
-Name: {name}.
-Affiliation: {affil}.
-Contact: {email}.
-Notes about these data: {notes}
-'''.format(name=data['contributor_name'],
+    submit_title = '{}_{} {}'.format(data['iso'], data['level'], release_type)
+    submit_body = '''Boundary data for **{iso}-{level}** submitted through the geoBoundaries contribution form. 
+
+**Name**: {name}.
+**Affiliation**: {affil}.
+**Contact**: {email}.
+**Notes about these data**: {notes}
+'''.format(iso=data['iso'],
+           level=data['level'],
+           name=data['contributor_name'],
            affil=data['contributor_affiliation'],
            email=data['contributor_email'],
            notes=data['notes'])
     zip_path_dst = 'sourceData/{}/{}_{}.zip'.format(release_type, data['iso'], data['level'])
     files = {zip_path:zip_path_dst}
-    github_url = submit_to_github(branch, submit_title, submit_body, files=files)
+
+    pull_url = submit_to_github(branch, submit_title, submit_body, files=files)
     
-    return redirect(github_url)
+    return redirect(pull_url)
 
 def create_meta_file(data):
     writer = open(tempfile.mktemp(), mode='w', encoding='utf8')
@@ -120,7 +127,7 @@ def create_meta_file(data):
         line = 'Source {}: {}'.format(i, src)
         lines.append(line)
         i += 1
-    line = 'Release Type: {}'.format(data.get('release_type',''))
+    line = 'Release Type: {}'.format(data.get('release_type','gbOpen')) # defaults to gbOpen
     lines.append(line)
     line = 'License: {}'.format(data.get('license',''))
     lines.append(line)
@@ -156,9 +163,12 @@ def standardize_uploaded_shapefile(reader, level, name_field, iso=None, iso_fiel
         if level == 'ADM0':
             # country ISO code
             attr['ISO_Code'] = iso
-        elif level == 'ADM1' and iso_field:
+        elif level == 'ADM1':
             # ADM1 ISO code
-            attr['ISO_Code'] = rec[iso_field]
+            if iso_field:
+                attr['ISO_Code'] = rec[iso_field]
+            else:
+                attr['ISO_Code'] = ''
         writer.record(**attr)
         writer.shape(shaperec.shape)
     # close up
@@ -187,8 +197,19 @@ def submit_to_github(branchname, title, body, files):
         try:
             fork.create_file(dst, message, content, branch=branchname)
         except:
-            existing = fork.get_contents(dst, ref='refs/heads/' + branchname)
-            fork.update_file(dst, message, content, sha=existing.sha, branch=branchname)
+            # get sha of existing file by inspecting parent folder's git tree.
+            # get_contents() is easier but downloads the entire file and fails
+            # for larger filesizes.
+            dst_folder = os.path.dirname(dst)
+            tree_url = 'https://api.github.com/repos/geoBoundaryBot/geoBoundaries/git/trees/{}:{}'.format(branchname, quote_plus(dst_folder))
+            print('parent tree url', tree_url)
+            tree = json.loads(urlopen(tree_url).read())
+            # loop files in tree until file is found
+            for member in tree['tree']:
+                if dst.endswith(member['path']):
+                    existing_sha = member['sha']
+                    break
+            fork.update_file(dst, message, content, sha=existing_sha, branch=branchname)
     # make pull request
     pull = upstream.create_pull(title, body, base=upstream_branch, head='geoBoundaryBot:'+branchname)
     
