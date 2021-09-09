@@ -1,4 +1,5 @@
 from django.http import HttpResponse
+from django.shortcuts import redirect
 from django.views.decorators.csrf import csrf_exempt
 from decouple import config
 
@@ -22,13 +23,18 @@ def api_contribute(request):
     print('received')
     data = request.POST
     print(data)
+    print(request.FILES)
+
+    # check that agreed
+    if not data['agree_to_terms'] == 'agree':
+        raise Exception('Contribution requires that the user agrees to the terms, indicated by \
+                        the "agree_to_terms" flag set to "agree", but instead received: {}'.format(data['agree_to_terms']))
 
     # create meta.txt expected by gb PR
     meta_file = create_meta_file(data)
     print('meta', meta_file)
 
-    # standardize the file to a new shapefile
-    print(request.FILES)
+    # standardize the given zip/shapefile to a new shapefile
     fileobj = request.FILES['file']
     archive = zipfile.ZipFile(fileobj)
     for name in archive.namelist():
@@ -40,34 +46,47 @@ def api_contribute(request):
     dbf = archive.open(filename+'.dbf')
     reader = shapefile.Reader(shp=shp, shx=shx, dbf=dbf)
     standardized_shapefile = standardize_uploaded_shapefile(reader,
-                                                            iso=data['iso'],
                                                             level=data['level'],
-                                                            name_field=data['name_field'])
+                                                            name_field=data['name_field'],
+                                                            iso=data['iso'],
+                                                            iso_field=data['iso_field'])
     print('shapefile', standardized_shapefile, len(standardized_shapefile), standardized_shapefile.fields)
 
-    # lastly pack these into a zipfile
-    shapefile_name = '{}_{}'.format(data['iso'], data['level'])
+    # load the image file
+    screenshot_fileobj = request.FILES['license_screenshot']
 
+    # lastly pack these into a zipfile
     zip_path = tempfile.mktemp()
     submit_archive = zipfile.ZipFile(zip_path, mode='w')
-
+    
+    # meta file
     meta_path = meta_file.name
+    submit_archive.writestr('meta.txt', open(meta_path, mode='rb').read())
+
+    # shapefile
     shp_path = standardized_shapefile.shp.name
     shx_path = standardized_shapefile.shx.name
     dbf_path = standardized_shapefile.dbf.name
-    
-    submit_archive.writestr('meta.txt', open(meta_path, mode='rb').read())
+    shapefile_name = '{}_{}'.format(data['iso'], data['level'])
     submit_archive.writestr('{}.shp'.format(shapefile_name), open(shp_path, mode='rb').read())
     submit_archive.writestr('{}.shx'.format(shapefile_name), open(shx_path, mode='rb').read())
     submit_archive.writestr('{}.dbf'.format(shapefile_name), open(dbf_path, mode='rb').read())
 
+    # prj file
+    wgs84_wkt = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]'
+    submit_archive.writestr('{}.prj'.format(shapefile_name), wgs84_wkt.encode('utf8'))
+
+    # license screenshot
+    submit_archive.writestr('LICENSE.PNG', screenshot_fileobj.read())
+
+    # close
     submit_archive.close()
     print('zipped files', submit_archive)
 
     # submit to github
     release_type = 'gbOpen'
     branch = 'gbContribute-{}-{}_{}-{}'.format(release_type, data['iso'], data['level'], get_timehash())
-    submit_title = 'TEST_{}_{} {}'.format(data['iso'], data['level'], release_type)
+    submit_title = 'TESTING: {}_{} {}'.format(data['iso'], data['level'], release_type)
     submit_body = '''THIS IS JUST A TEST.
 A user has just submitted boundary data through the geoBoundaries contribution form. 
 Name: {name}.
@@ -80,9 +99,9 @@ Notes about these data: {notes}
            notes=data['notes'])
     zip_path_dst = 'sourceData/{}/{}_{}.zip'.format(release_type, data['iso'], data['level'])
     files = {zip_path:zip_path_dst}
-    submit_to_github(branch, submit_title, submit_body, files=files)
+    github_url = submit_to_github(branch, submit_title, submit_body, files=files)
     
-    return HttpResponse(status=200)
+    return redirect(github_url)
 
 def create_meta_file(data):
     writer = open(tempfile.mktemp(), mode='w', encoding='utf8')
@@ -120,20 +139,26 @@ def create_meta_file(data):
     writer.close()
     return writer
 
-def standardize_uploaded_shapefile(reader, iso, level, name_field):
+def standardize_uploaded_shapefile(reader, level, name_field, iso=None, iso_field=None):
     # create writer
     writer = shapefile.Writer(tempfile.mktemp())
     # required fields
     writer.field('Name', 'C')
     writer.field('Level', 'C')
-    writer.field('ISO_Code', 'C')
+    if level in ['ADM0','ADM1']:
+        writer.field('ISO_Code', 'C')
     # add from reader
     for shaperec in reader:
         rec = shaperec.record
         attr = {'Name':rec[name_field],
                'Level':level,
-               'ISO_Code':iso,
                }
+        if level == 'ADM0':
+            # country ISO code
+            attr['ISO_Code'] = iso
+        elif level == 'ADM1' and iso_field:
+            # ADM1 ISO code
+            attr['ISO_Code'] = rec[iso_field]
         writer.record(**attr)
         writer.shape(shaperec.shape)
     # close up
@@ -142,55 +167,35 @@ def standardize_uploaded_shapefile(reader, iso, level, name_field):
 
 def submit_to_github(branchname, title, body, files):
     # init
-    token = config('GITHUB_TOKEN')
-    g = Github(token)
+    g = Github(config('GITHUB_TOKEN'))
     upstream = g.get_repo('wmgeolab/geoBoundaries') # upstream
+    upstream_branch = 'main'
     # get or create the fork
     try:
-        repo = g.get_user().get_repo('geoBoundaries')
+        # get existing fork
+        fork = g.get_user().get_repo('geoBoundaries')
     except:
-        repo = g.get_user().create_fork(upstream)
-    # make sure the main branch of the fork is updated
-    # ... 
-    oldname = 'main'
-    # create new branch
-    newname = branchname
-    print('branch name',newname)
-    repo.create_git_ref(ref='refs/heads/' + newname, sha=repo.get_branch(oldname).commit.sha)
+        # fork doesn't already exist, eg if the geoBoundaryBot's fork has been deleted/cleaned up
+        fork = g.get_user().create_fork(upstream)
+    # create new branch based on upstream
+    fork.create_git_ref(ref='refs/heads/' + branchname, 
+                        sha=upstream.get_git_ref(ref='heads/' + upstream_branch).object.sha)
     # commit files to new branch
     for src,dst in files.items():
         message = 'Add {}'.format(dst)
         content = open(src, mode='rb').read()
         try:
-            repo.create_file(dst, message, content, branch=newname)
+            fork.create_file(dst, message, content, branch=branchname)
         except:
-            existing = repo.get_contents(dst, ref='refs/heads/' + newname)
-            repo.update_file(dst, message, content, sha=existing.sha, branch=newname)
+            existing = fork.get_contents(dst, ref='refs/heads/' + branchname)
+            fork.update_file(dst, message, content, sha=existing.sha, branch=branchname)
     # make pull request
-    upstream.create_pull(title, body, base=oldname, head='geoBoundaryBot:'+newname)
+    pull = upstream.create_pull(title, body, base=upstream_branch, head='geoBoundaryBot:'+branchname)
+    
+    # return the url
+    pull_url = 'https://github.com/wmgeolab/geoBoundaries/pull/{}'.format(pull.number)
+    return pull_url
 
-##def test_submit_to_github(*args):
-##    token = config('GITHUB_TOKEN')
-##    from github import Github
-##    g = Github(token)
-##    repo = g.get_user().get_repo('boundaryCompare')
-##    print(repo)
-##    oldname = 'main'
-##    oldbranch = repo.get_branch(oldname)
-##    # create new branch
-##    newname = 'testbranch' # gbContribute-{datetimehash}
-##    repo.create_git_ref(ref='refs/heads/' + newname, sha=oldbranch.commit.sha)
-##    # test commit new file to new branch
-##    path = 'test.txt'
-##    message = 'testing'
-##    content = 'hello world'
-##    repo.create_file(path, message, content, branch=newname)
-##    # make pull request
-##    title = 'Test PR'
-##    body = 'hello world'
-##    base = oldname
-##    head = newname
-##    repo.create_pull(title, body, base, head)
     
 
 
