@@ -56,17 +56,20 @@ def api_contribute(request):
     print('shapefile', standardized_shapefile, len(standardized_shapefile), standardized_shapefile.fields)
 
     # load the image file
-    screenshot_fileobj = request.FILES['license_screenshot']
+    try:
+        screenshot_fileobj = request.FILES['license_screenshot']
+    except:
+        screenshot_fileobj = None
 
     # lastly pack these into a zipfile
     zip_path = tempfile.mktemp()
     submit_archive = zipfile.ZipFile(zip_path, mode='w')
     
-    # meta file
+    # add meta file
     meta_path = meta_file.name
     submit_archive.writestr('meta.txt', open(meta_path, mode='rb').read())
 
-    # shapefile
+    # add shapefile
     shp_path = standardized_shapefile.shp.name
     shx_path = standardized_shapefile.shx.name
     dbf_path = standardized_shapefile.dbf.name
@@ -75,13 +78,15 @@ def api_contribute(request):
     submit_archive.writestr('{}.shx'.format(shapefile_name), open(shx_path, mode='rb').read())
     submit_archive.writestr('{}.dbf'.format(shapefile_name), open(dbf_path, mode='rb').read())
 
-    # prj file
+    # add prj file
+    # for now just assume the file is wgs84
     wgs84_wkt = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]'
     submit_archive.writestr('{}.prj'.format(shapefile_name), wgs84_wkt.encode('utf8'))
 
-    # license screenshot
-    _,ext = os.path.splitext(screenshot_fileobj.name)
-    submit_archive.writestr('license{}'.format(ext), screenshot_fileobj.read())
+    # add license screenshot
+    if screenshot_fileobj:
+        _,ext = os.path.splitext(screenshot_fileobj.name)
+        submit_archive.writestr('license{}'.format(ext), screenshot_fileobj.read())
 
     # close
     submit_archive.close()
