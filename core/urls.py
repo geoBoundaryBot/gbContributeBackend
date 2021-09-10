@@ -21,4 +21,5 @@ from . import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api_contribute/', views.api_contribute, name='api_contribute'),
+    path('api_poke/', views.api_poke, name='api_poke'),
 ]

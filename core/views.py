@@ -22,7 +22,17 @@ def get_timehash():
     return h.hexdigest()
 
 @csrf_exempt
+def api_poke(request):
+    '''Poke the heroku server to wake it up from its slumber (free account).'''
+    return HttpResponse(status=204)
+
+@csrf_exempt
 def api_contribute(request):
+    '''Receives form data from gbContribute.html, standardizes and outputs this information
+    as a zip archive according to the geoBoundaries contribution guidelines, adds the zip archive 
+    to a forked branch under 'geoBoundaryBot/geoBoundaries/sourceData', and submits this as a PR to 
+    'wmgeolab/geoBoundaries'.
+    '''
     print('received')
     data = request.POST
     print(data)
